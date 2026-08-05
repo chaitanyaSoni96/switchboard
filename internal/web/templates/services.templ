@@ -1,0 +1,216 @@
+package templates
+
+import (
+	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"time"
+
+	"switchboard/internal/discover"
+)
+
+// ServicesView is the polled fragment's model.
+//
+// Private is populated only for loopback callers. A LAN request never carries
+// private entries this far, so they cannot reach the response body — the tier
+// split is enforced by omission, not by CSS.
+type ServicesView struct {
+	Public      []discover.Service
+	Private     []discover.Service
+	ShowPrivate bool
+	// LinkHost is the host the request arrived on, so a card on the LAN links
+	// to the LAN address rather than to the viewer's own loopback.
+	LinkHost  string
+	ScannedAt time.Time
+}
+
+templ Services(v ServicesView) {
+	<div class="flex items-baseline gap-4 pb-4 text-muted text-row">
+		<span>{ counted(len(v.Public)+len(v.Private)) } found</span>
+		<span>·</span>
+		<time>scanned { stamp(v.ScannedAt) }</time>
+		<span id="filter-note" class="text-accent"></span>
+	</div>
+	if len(v.Public) == 0 && len(v.Private) == 0 {
+		@empty()
+	} else {
+		@section("public", "reachable from anywhere this machine is reachable", v.Public, v)
+		if v.ShowPrivate {
+			@section("private", "loopback only — visible to you because you came from this machine", v.Private, v)
+		}
+	}
+}
+
+templ section(name, blurb string, svcs []discover.Service, v ServicesView) {
+	<section class="pb-8" data-section={ name }>
+		<div class="flex flex-wrap items-baseline gap-3 pb-3">
+			<h2 class="m-0 text-meta font-semibold tracking-[0.02em]">
+				<span class="text-accent">{ name }</span>
+			</h2>
+			<span class="border border-border rounded-badge px-2 text-accent text-row">
+				{ strconv.Itoa(len(svcs)) }
+			</span>
+			<span class="text-muted text-row">{ blurb }</span>
+		</div>
+		if len(svcs) == 0 {
+			<p class="m-0 text-muted text-row">nothing bound { name }.</p>
+		} else {
+			<div class="grid-cards">
+				for _, s := range svcs {
+					@card(s, v)
+				}
+			</div>
+		}
+	</section>
+}
+
+templ card(s discover.Service, v ServicesView) {
+	<a
+		class="card relative overflow-hidden block bg-surface border border-border rounded-card no-underline text-text transition-colors hover:border-accent"
+		href={ templ.SafeURL(v.Href(s)) }
+		data-search={ haystack(s) }
+		title={ tooltip(s) }
+	>
+		<!--
+			Decorative only, hence alt="" and aria-hidden. A service with no
+			usable icon 404s here, and onerror drops the element so the card
+			renders exactly as it did before rather than showing a broken image.
+		-->
+		<img
+			class="card-icon"
+			src={ iconURL(s) }
+			alt=""
+			aria-hidden="true"
+			loading="lazy"
+			decoding="async"
+			onerror="this.remove()"
+		/>
+		<div class="relative flex flex-col gap-[0.4rem] px-4 py-3">
+			<div class="flex items-baseline gap-2 min-w-0">
+				<span class={ "shrink-0 self-center size-2 rounded-badge", dotClass(s.Alive) } aria-hidden="true"></span>
+				<span class="font-semibold overflow-hidden text-ellipsis whitespace-nowrap">{ s.Name }</span>
+				<span class="ml-auto shrink-0 text-accent">:{ strconv.Itoa(s.Port) }</span>
+			</div>
+			<div class="text-muted text-row overflow-hidden text-ellipsis whitespace-nowrap">
+				{ s.Owner() }
+			</div>
+			if s.Backend != nil {
+				<!--
+					The socket belongs to a port forwarder, so the process above is
+					the container's, not the one /proc named. Say so explicitly
+					rather than quietly swapping one name for another.
+				-->
+				<div class="text-muted text-tag overflow-hidden text-ellipsis whitespace-nowrap">
+					via { s.Backend.Via } → { s.Backend.Addr }
+				</div>
+			}
+			<div class="flex items-center justify-between gap-3 text-muted text-row">
+				<span class="overflow-hidden text-ellipsis whitespace-nowrap">
+					if s.Server != "" && s.Server != s.Name {
+						{ s.Server }
+					}
+				</span>
+				<span class="flex shrink-0 items-center gap-2">
+					if s.Scheme == "https" {
+						<span class="border border-accent rounded-badge px-2 text-tag text-accent">tls</span>
+					}
+					<span class="border border-border rounded-badge px-2 text-tag">{ s.Bind }</span>
+				</span>
+			</div>
+		</div>
+	</a>
+}
+
+templ empty() {
+	<div class="text-muted text-center py-20 px-4 border border-dashed border-border rounded-card">
+		<p class="m-0">No HTTP services found.</p>
+		<p class="m-0 text-row">
+			Switchboard lists ports in <code class="bg-bg border border-border rounded px-1">LISTEN</code>
+			that answer <code class="bg-bg border border-border rounded px-1">GET /</code> over HTTP.
+		</p>
+	</div>
+}
+
+// Href builds the card link from the host the viewer actually used, so a LAN
+// visitor gets http://box.local:3000/ rather than a loopback URL that would
+// resolve to their own machine. The scheme is whichever one the probe found the
+// port actually answering — linking to a TLS port over http:// never works.
+func (v ServicesView) Href(s discover.Service) string {
+	scheme := s.Scheme
+	if scheme == "" {
+		scheme = "http"
+	}
+	return scheme + "://" + net.JoinHostPort(v.LinkHost, strconv.Itoa(s.Port)) + "/"
+}
+
+// iconURL points at Switchboard's own icon route rather than at the service.
+// Same-origin keeps the watermark working when Switchboard is served over HTTPS
+// through a tunnel, where an http:// image would be blocked as mixed content.
+func iconURL(s discover.Service) string {
+	return "/icon/" + strconv.Itoa(s.Port)
+}
+
+// haystack is what the client-side filter matches against. It includes the
+// backend so that searching "minio" finds a port whose host-side process is
+// only ever called "rootlesskit".
+func haystack(s discover.Service) string {
+	fields := []string{s.Name, strconv.Itoa(s.Port), s.Process, s.Server, s.Bind, s.Scheme}
+	if s.Backend != nil {
+		fields = append(fields, s.Backend.Process, s.Backend.Cmdline, s.Backend.Addr, s.Backend.Via)
+	}
+	return strings.ToLower(strings.Join(fields, " "))
+}
+
+func tooltip(s discover.Service) string {
+	var b strings.Builder
+	b.WriteString(pidLine(s.Process, s.PID))
+	if s.Cmdline != "" {
+		b.WriteString("\n" + clip(s.Cmdline, 160))
+	}
+	if s.Backend != nil {
+		b.WriteString("\n\nforwards to " + s.Backend.Addr)
+		if s.Backend.Process != "" {
+			b.WriteString("\n" + pidLine(s.Backend.Process, s.Backend.PID))
+		}
+		if s.Backend.Cmdline != "" {
+			b.WriteString("\n" + clip(s.Backend.Cmdline, 160))
+		}
+	}
+	if s.Server != "" {
+		b.WriteString("\n\nServer: " + s.Server)
+	}
+	if !s.Alive {
+		b.WriteString("\nnot answering")
+	}
+	return b.String()
+}
+
+func pidLine(comm string, pid int) string {
+	if pid == 0 {
+		return comm
+	}
+	return fmt.Sprintf("%s (pid %d)", comm, pid)
+}
+
+// clip keeps long container command lines from turning a tooltip into a wall.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+func dotClass(alive bool) string {
+	if alive {
+		return "bg-accent"
+	}
+	return "bg-muted opacity-50"
+}
+
+func counted(n int) string {
+	if n == 1 {
+		return "1 service"
+	}
+	return strconv.Itoa(n) + " services"
+}

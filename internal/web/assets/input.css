@@ -1,0 +1,132 @@
+@import "tailwindcss";
+@source "../templates";
+
+/* Design tokens are Scratchpad's, carried over verbatim from
+   scratchpad/internal/web/assets/style.css — same variable names, same values,
+   same dark-default / prefers-color-scheme-light mechanism. Tailwind's colour
+   utilities are mapped onto them below so `bg-surface` and `text-accent`
+   resolve through the very same custom properties Scratchpad uses. */
+@theme {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-danger: var(--danger);
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+
+  /* Scratchpad's card geometry: 10px radius, 320px minimum column. */
+  --radius-card: 10px;
+  --radius-badge: 999px;
+
+  /* Scratchpad's exact type sizes rather than Tailwind's nearest defaults. */
+  --text-h1: 1.4rem;
+  --text-meta: 0.85rem;
+  --text-row: 0.8rem;
+  --text-tag: 0.7rem;
+}
+
+@layer base {
+  :root {
+    /* Declaring the scheme keeps the browser's default canvas dark on full
+       loads. */
+    color-scheme: dark light;
+    --bg: #101014;
+    --surface: #18181f;
+    --border: #2a2a35;
+    --text: #e8e8ee;
+    --muted: #8b8b9a;
+    --accent: #ffb454;
+    --danger: #ff6b6b;
+  }
+  @media (prefers-color-scheme: light) {
+    :root {
+      color-scheme: light;
+      --bg: #f6f5f2;
+      --surface: #ffffff;
+      --border: #e2e0da;
+      --text: #1c1c22;
+      --muted: #77756e;
+      --accent: #b6690a;
+      --danger: #c0392b;
+    }
+  }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    min-height: 100vh;
+  }
+}
+
+@layer components {
+  /* Scratchpad's grid, to the pixel. */
+  .grid-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.25rem;
+  }
+  /* A card filtered out by the search box leaves the layout entirely, so the
+     grid reflows instead of leaving holes. */
+  .is-hidden {
+    display: none !important;
+  }
+
+  /* The refresh control spins while its request is in flight. :has() reaches
+     back to the header from the main element htmx marks, and where it is not
+     supported the button simply does not animate. */
+  body:has(#services.htmx-request) .refresh-now {
+    animation: sb-spin 0.6s linear infinite;
+  }
+  @keyframes sb-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body:has(#services.htmx-request) .refresh-now {
+      animation: none;
+      opacity: 0.5;
+    }
+  }
+
+  /* The service's own favicon, watermarked against the right edge of its card.
+     It is decoration, so it sits behind the text, ignores the pointer, and
+     fades out towards the label rather than relying on opacity alone to stay
+     legible. A fixed 120px square keeps every card's mark the same size
+     whatever the source image is; object-fit preserves its aspect ratio, and
+     the card's overflow clips the overhang against a shorter card. */
+  .card-icon {
+    position: absolute;
+    right: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 120px;
+    height: 120px;
+    object-fit: contain;
+    object-position: right center;
+    opacity: 0.12;
+    pointer-events: none;
+    user-select: none;
+    transition: opacity 0.15s;
+    -webkit-mask-image: linear-gradient(to left, #000 0%, #000 30%, transparent 100%);
+    mask-image: linear-gradient(to left, #000 0%, #000 30%, transparent 100%);
+  }
+  .card:hover .card-icon {
+    opacity: 0.22;
+  }
+  /* Light mode puts dark marks on a white surface, where the same alpha reads
+     much heavier; ease off so the text keeps its contrast. */
+  @media (prefers-color-scheme: light) {
+    .card-icon {
+      opacity: 0.09;
+    }
+    .card:hover .card-icon {
+      opacity: 0.16;
+    }
+  }
+}

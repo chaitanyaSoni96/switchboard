@@ -1,0 +1,5 @@
+# build output
+/bin/switchboard
+
+# fetched by `make css`, not source
+/bin/tailwindcss

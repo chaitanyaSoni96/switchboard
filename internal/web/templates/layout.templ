@@ -1,0 +1,117 @@
+package templates
+
+import (
+	"strconv"
+	"time"
+)
+
+// refreshChoice is one entry in the auto-refresh selector.
+type refreshChoice struct {
+	Seconds int
+	Label   string
+}
+
+// refreshChoices drives the selector. "off" is first, and so is what the
+// browser selects with no explicit selected attribute — the default is to poll
+// nothing at all, and refresh.js only departs from it if a previous choice was
+// stored.
+var refreshChoices = []refreshChoice{
+	{0, "off"},
+	{5, "5s"},
+	{15, "15s"},
+	{30, "30s"},
+	{60, "1m"},
+	{300, "5m"},
+}
+
+// The favicon is Scratchpad's: the same ▚ glyph in the same accent orange,
+// inlined as a data URI so the binary has no asset dependencies.
+const favicon = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='13' font-size='14' fill='%23ffb454'%3E%E2%96%9A%3C/text%3E%3C/svg%3E"
+
+// PageView is everything the shell needs; Services carries the grid itself.
+type PageView struct {
+	Hostname string
+	Services ServicesView
+}
+
+templ Page(v PageView) {
+	<!DOCTYPE html>
+	<html lang="en">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>switchboard</title>
+			<!-- SafeURL: templ's sanitizer only trusts http/https/mailto/tel, and
+			     would otherwise replace this inline data: URI with about:invalid. -->
+			<link rel="icon" href={ templ.SafeURL(favicon) }/>
+			<link rel="stylesheet" href="/static/style.css"/>
+			<script src="/static/htmx.min.js"></script>
+			<script src="/static/search.js" defer></script>
+			<script src="/static/refresh.js" defer></script>
+		</head>
+		<body>
+			<header class="flex flex-wrap items-baseline gap-4 px-8 pt-8 pb-4">
+				<h1 class="m-0 text-h1 tracking-[0.02em]">
+					<span class="text-accent">▚ </span>switchboard
+				</h1>
+				<p class="m-0 text-muted text-meta">{ v.Hostname }</p>
+				<label class="ml-auto flex items-center gap-2">
+					<span class="sr-only">filter services</span>
+					<input
+						id="search"
+						type="search"
+						autocomplete="off"
+						spellcheck="false"
+						placeholder="filter…"
+						class="w-56 bg-surface border border-border rounded-card px-3 py-1 font-mono text-row text-text placeholder:text-muted outline-none focus:border-accent"
+					/>
+				</label>
+				<label class="flex items-center gap-2">
+					<span class="sr-only">auto-refresh interval</span>
+					<span class="relative flex items-center">
+						<select
+							id="interval"
+							class="appearance-none bg-surface border border-border rounded-card pl-3 pr-7 py-1 font-mono text-row text-muted outline-none cursor-pointer hover:border-accent focus:border-accent"
+							title="auto-refresh interval"
+						>
+							for _, o := range refreshChoices {
+								<option value={ strconv.Itoa(o.Seconds) }>{ o.Label }</option>
+							}
+						</select>
+						<span class="pointer-events-none absolute right-2 text-muted text-tag">▾</span>
+					</span>
+				</label>
+				<!--
+					With auto-refresh off by default, this is the only way to update
+					the grid short of reloading the whole page.
+				-->
+				<button
+					id="refresh-now"
+					type="button"
+					class="refresh-now bg-surface border border-border rounded-card px-3 py-1 font-mono text-row text-muted cursor-pointer hover:border-accent hover:text-accent"
+					title="refresh now"
+					aria-label="refresh now"
+				>↻</button>
+			</header>
+			<!--
+				Nothing here polls on its own. Auto-refresh defaults to off, and
+				when it is switched on the interval is driven from refresh.js
+				rather than a fixed hx-trigger. Discovery is lazy, so a page that
+				is not asking is a process doing no work at all.
+			-->
+			<main
+				id="services"
+				class="px-8 pt-4 pb-12"
+				hx-get="/partials/services"
+				hx-trigger="sb:refresh"
+				hx-swap="innerHTML"
+			>
+				@Services(v.Services)
+			</main>
+		</body>
+	</html>
+}
+
+func stamp(t time.Time) string {
+	return t.Format("15:04:05")
+}
