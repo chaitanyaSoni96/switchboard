@@ -205,6 +205,14 @@ func TestParseTitle(t *testing.T) {
 		{`<title>A &amp; B &lt;3</title>`, "A & B <3"},
 		{`<html><body>no title here</body></html>`, ""},
 		{`<title></title>`, ""},
+		// react-helmet emits an empty placeholder ahead of the real title; Expo's
+		// dev server serves exactly this. Taking the first match names the card
+		// after the process instead.
+		{`<head><title data-rh="true"></title><meta charSet="utf-8"/><title>Engagement Platform</title>`, "Engagement Platform"},
+		{`<title>   </title><title>Real</title>`, "Real"},
+		{`<title></title><title></title>`, ""},
+		// A page with one real title must not be affected by the change.
+		{`<title>Only</title><title>Second</title>`, "Only"},
 	}
 	for _, tt := range tests {
 		if got := parseTitle([]byte(tt.in)); got != tt.want {

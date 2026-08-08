@@ -253,17 +253,25 @@ var titleRe = regexp.MustCompile(`(?is)<title[^>]*>(.*?)</title>`)
 
 // parseTitle pulls a display name out of an HTML head. Whitespace inside a
 // title is collapsed because plenty of templates wrap it across lines.
+//
+// A page may carry more than one <title>, so this takes the first with content
+// rather than simply the first. react-helmet and react-head emit an empty
+// placeholder ahead of the real one — Expo's dev server is a stock example —
+// and honouring that blank costs the card its name for no reason: the real
+// title is a few bytes further into the same body we already read.
 func parseTitle(body []byte) string {
-	m := titleRe.FindSubmatch(body)
-	if m == nil {
-		return ""
+	for _, m := range titleRe.FindAllSubmatch(body, -1) {
+		title := html.UnescapeString(string(m[1]))
+		title = strings.Join(strings.Fields(title), " ")
+		if title == "" {
+			continue
+		}
+		if len(title) > 80 {
+			title = strings.TrimSpace(title[:80]) + "…"
+		}
+		return title
 	}
-	title := html.UnescapeString(string(m[1]))
-	title = strings.Join(strings.Fields(title), " ")
-	if len(title) > 80 {
-		title = strings.TrimSpace(title[:80]) + "…"
-	}
-	return title
+	return ""
 }
 
 // alive reports whether each port still accepts a TCP connection. This runs on
