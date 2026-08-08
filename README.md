@@ -144,13 +144,20 @@ The work is cached in layers, because the costs are wildly uneven:
 | Parse `/proc/net/tcp` + `tcp6` | sub-millisecond | none — re-read every request |
 | Socket inode → PID | walks every `/proc/*/fd` | 30s, and only re-walked when an inode is actually unknown |
 | Container forward → backend | reads a namespace link per process | 30s, and only for ports held by a forwarder |
-| HTTP probe for `<title>` | up to 2s per new port | keyed on port + PID + process start time, so effectively permanent per process |
+| HTTP probe for `<title>` | up to 2s per new port | success is keyed on port + PID + process start time, so effectively permanent per process; a failure expires after 60s |
 | Liveness | one TCP dial | every request, all ports in parallel, 250ms timeout |
 
 Keying the probe cache on `/proc/<pid>/stat` field 22 (start time) alongside the
-PID is what makes it safe to keep forever: a restarted service misses the cache
-and gets re-probed even if the kernel handed it the same PID, while a
-long-running one is probed exactly once.
+PID is what makes a *successful* probe safe to keep forever: a restarted service
+misses the cache and gets re-probed even if the kernel handed it the same PID,
+while a long-running one is probed exactly once.
+
+A *failed* probe gets no such treatment, because it is a much weaker claim — it
+says only that one port did not complete an HTTP exchange inside one two-second
+window. A dev server binds its port well before it can serve it, so a cold Metro
+or Vite bundle looks exactly like a port that will never speak HTTP. Those
+verdicts expire after 60s and are retried, which is why a service that was slow
+to start appears on its own rather than staying invisible until you restart it.
 
 If a scan is already in flight when a request arrives, that request is served
 the previous snapshot immediately rather than queueing behind it — the in-flight

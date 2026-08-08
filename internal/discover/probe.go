@@ -24,6 +24,20 @@ const (
 	// Without a PID and start time the cache key cannot detect a restart, so
 	// those entries expire on time instead.
 	unknownProbeTTL = 60 * time.Second
+	// failedProbeTTL applies to ports that did not answer as HTTP.
+	//
+	// A success describes the process and stays true for as long as it runs, but
+	// a failure describes one probeTimeout-long window and nothing more. A dev
+	// server still building its first bundle — Metro, Vite on a cold cache, a
+	// JVM service behind a healthcheck — binds its port long before it can serve
+	// it, and is indistinguishable at that moment from a port that will never
+	// speak HTTP. Caching that verdict for the life of the process makes such a
+	// service invisible until it restarts.
+	//
+	// Retrying costs one probeTimeout per still-silent port per TTL. They run
+	// concurrently, so the cost is one ~2s scan a minute at worst, and only
+	// while somebody is actually looking at the page.
+	failedProbeTTL = 60 * time.Second
 )
 
 // probeKey identifies one process's listening port. Including the start time
@@ -35,8 +49,9 @@ type probeKey struct {
 	Start uint64
 }
 
-// probeResult is the permanent half of what we know about a port: whether it
-// speaks HTTP at all, over which scheme, and what it calls itself.
+// probeResult is the durable half of what we know about a port: whether it
+// speaks HTTP at all, over which scheme, and what it calls itself. A successful
+// result lasts as long as the process does; a failed one expires, see expired.
 type probeResult struct {
 	HTTP   bool
 	Scheme string // "http" or "https" — the one that actually answered
@@ -126,6 +141,11 @@ func (p *prober) probeAll(keys map[probeKey][]string) map[probeKey]probeResult {
 }
 
 func expired(k probeKey, r probeResult) bool {
+	// A failure is a claim about one probe window rather than about the process,
+	// so it always perishes — including when the PID is known.
+	if !r.HTTP {
+		return time.Since(r.At) > failedProbeTTL
+	}
 	return k.PID == 0 && time.Since(r.At) > unknownProbeTTL
 }
 

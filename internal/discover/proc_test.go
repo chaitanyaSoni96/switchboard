@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseHexAddr(t *testing.T) {
@@ -365,5 +366,44 @@ func TestLoopbackHostsPrefersMatchingFamily(t *testing.T) {
 	}
 	if got := loopbackHosts(v6); got[0] != "::1" {
 		t.Errorf("v6 should probe ::1 first, got %v", got)
+	}
+}
+
+// A failed probe must expire even when the owning process is known. Metro and
+// friends bind their port well before they can serve it, so a failure cached
+// for the life of the process hides the service until it restarts.
+func TestFailedProbeExpiresWithKnownPID(t *testing.T) {
+	k := probeKey{Port: 8081, PID: 1234, Start: 99}
+
+	fresh := probeResult{HTTP: false, At: time.Now()}
+	if expired(k, fresh) {
+		t.Error("a failure younger than failedProbeTTL should still be cached")
+	}
+
+	stale := probeResult{HTTP: false, At: time.Now().Add(-2 * failedProbeTTL)}
+	if !expired(k, stale) {
+		t.Error("a failure older than failedProbeTTL should expire and be re-probed")
+	}
+}
+
+// A success is a statement about the process, and the key pins it to one PID
+// and start time, so it stays valid for as long as that process runs.
+func TestSuccessfulProbeNeverExpiresWithKnownPID(t *testing.T) {
+	k := probeKey{Port: 3000, PID: 1234, Start: 99}
+	old := probeResult{HTTP: true, At: time.Now().Add(-24 * time.Hour)}
+	if expired(k, old) {
+		t.Error("a successful probe for a live PID should never expire")
+	}
+}
+
+// Without a PID the key cannot detect a restart, so even a success expires.
+func TestSuccessfulProbeExpiresWhenPIDUnknown(t *testing.T) {
+	k := probeKey{Port: 3000, PID: 0}
+	if expired(k, probeResult{HTTP: true, At: time.Now()}) {
+		t.Error("a fresh unattributed success should still be cached")
+	}
+	stale := probeResult{HTTP: true, At: time.Now().Add(-2 * unknownProbeTTL)}
+	if !expired(k, stale) {
+		t.Error("an unattributed success older than unknownProbeTTL should expire")
 	}
 }
