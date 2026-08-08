@@ -9,27 +9,14 @@ shows to the rest of your network.
 
 One static Go binary. No database, no config file, no runtime dependencies.
 
-```
-▚ switchboard   machone                     [ filter… ]  [ off ▾ ]  [ ↻ ]
+Same box, two views — the private tier only ever reaches a caller on loopback,
+so a LAN visitor's response is missing those cards, not merely hiding them:
 
-12 services found · scanned 02:57:52
+![Switchboard viewed from localhost: both the public and private tiers, with the favicon watermark visible on a couple of cards](docs/screenshot-localhost.png)
 
-public   8   reachable from anywhere this machine is reachable
-┌────────────────────────────┐  ┌────────────────────────────┐
-│ ● Grafana            :3000 │  │ ● MinIO Console      :9001 │
-│   grafana                  │  │   minio server /data       │
-│                            │  │   via rootlesskit →        │
-│                    0.0.0.0 │  │             ⌗      0.0.0.0 │
-└────────────────────────────┘  └────────────────────────────┘
+![Switchboard viewed from a LAN peer: only the public tier, since the private section never left the server](docs/screenshot-lan.png)
 
-private   4   loopback only — visible to you because you came from this machine
-┌────────────────────────────┐  ┌────────────────────────────┐
-│ ● Alpha Dashboard    :9101 │  │ ● Grafana Alloy     :12345 │
-│   python3                  │  │   unknown                  │
-│                  127.0.0.1 │  │            ⌗     127.0.0.1 │
-└────────────────────────────┘  └────────────────────────────┘
-                                             ↑ favicon watermark
-```
+(Service names and processes above are illustrative, not a live box.)
 
 ## The tier split is presentation, not access control
 
