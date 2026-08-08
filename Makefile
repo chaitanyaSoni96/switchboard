@@ -30,13 +30,13 @@ $(TAILWIND):
 run: build
 	./bin/switchboard --port 8090
 
-# Installs to /usr/local/bin and enables the unit. Switchboard itself runs as
-# the invoking user, not as root — see systemd/switchboard.service.
+# Installs to /usr/local/bin and installs the unit. Switchboard runs under a
+# dynamic unprivileged identity — see systemd/switchboard.service.
 install: build
 	sudo install -m 0755 bin/switchboard /usr/local/bin/switchboard
 	sudo install -m 0644 systemd/switchboard.service /etc/systemd/system/switchboard.service
 	sudo systemctl daemon-reload
-	@echo "edit /etc/systemd/system/switchboard.service to set User=, then:"
+	@echo "Start at boot and run now with:"
 	@echo "  sudo systemctl enable --now switchboard"
 
 clean:

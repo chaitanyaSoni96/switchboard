@@ -88,28 +88,34 @@ and be shown the private tier.
 
 ### As a service
 
-`systemd/switchboard.service` runs Switchboard as an unprivileged user.
+`systemd/switchboard.service` runs Switchboard as a dynamically allocated,
+unprivileged user.
 
 ```sh
-sudo useradd --system --no-create-home --shell /usr/sbin/nologin switchboard
 make install        # binary to /usr/local/bin, unit to /etc/systemd/system
 sudo systemctl enable --now switchboard
 ```
 
-The unit grants exactly one capability, `CAP_SYS_PTRACE`, and the reason is
-narrow. Reading `/proc/net/tcp` needs no privileges — ports, bind addresses and
-tiers all work as any user. Naming the *process* behind a socket means reading
-`/proc/<pid>/fd`, which is gated by `ptrace_may_access()`, so an unprivileged
-process can only see the file descriptors of its own user's processes.
-`CAP_SYS_PTRACE` is the only capability that lifts that check
-(`CAP_DAC_READ_SEARCH` does not — the barrier is the ptrace check, not file
-permissions).
+The unit grants two capabilities, and the reason is narrow. Reading
+`/proc/net/tcp` needs no privileges — ports, bind addresses and tiers all work
+as any user. Naming the *process* behind a socket means walking
+`/proc/<pid>/fd`, and that crosses two different kernel checks:
 
-It is a genuinely powerful capability: it also permits reading any process's
-memory. **Deleting the two capability lines from the unit is a perfectly good
-choice.** Switchboard degrades cleanly without it — other users' services still
-appear, still get probed, still get their `<title>`, and simply show `unknown`
-as the process name.
+| Step | Check | Capability |
+|---|---|---|
+| List `/proc/<pid>/fd` | DAC — the directory is `dr-x------`, owned by the target's uid | `CAP_DAC_READ_SEARCH` |
+| Resolve each `socket:[N]` symlink | `ptrace_may_access()` | `CAP_SYS_PTRACE` |
+
+Both are required. `CAP_SYS_PTRACE` alone is not enough — it is not a DAC
+capability, so the listing fails with `EACCES` before any symlink is read, and
+the result is identical to granting nothing at all.
+
+They are genuinely powerful: `CAP_SYS_PTRACE` also permits reading any
+process's memory, and `CAP_DAC_READ_SEARCH` permits reading any file on the
+box. **Deleting the two capability lines from the unit is a perfectly good
+choice.** Switchboard degrades cleanly without them — other users' services
+still appear, still get probed, still get their `<title>`, and simply show
+`unknown` as the process name.
 
 ## How discovery works
 
