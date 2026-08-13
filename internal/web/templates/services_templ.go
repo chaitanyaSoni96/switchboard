@@ -475,14 +475,20 @@ func empty() templ.Component {
 
 // Href builds the card link from the host the viewer actually used, so a LAN
 // visitor gets http://box.local:3000/ rather than a loopback URL that would
-// resolve to their own machine. The scheme is whichever one the probe found the
+// resolve to their own machine. The exception is a service bound to one
+// specific address, which answers at that address and nowhere else — see
+// discover.Service.LinkAddr. The scheme is whichever one the probe found the
 // port actually answering — linking to a TLS port over http:// never works.
 func (v ServicesView) Href(s discover.Service) string {
 	scheme := s.Scheme
 	if scheme == "" {
 		scheme = "http"
 	}
-	return scheme + "://" + net.JoinHostPort(v.LinkHost, strconv.Itoa(s.Port)) + "/"
+	host := v.LinkHost
+	if bound := s.LinkAddr(); bound != "" {
+		host = bound
+	}
+	return scheme + "://" + net.JoinHostPort(host, strconv.Itoa(s.Port)) + "/"
 }
 
 // iconURL points at Switchboard's own icon route rather than at the service.

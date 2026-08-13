@@ -366,13 +366,15 @@ func TestNonHTTPPortIsDropped(t *testing.T) {
 	}
 }
 
-func TestLoopbackHostsPrefersMatchingFamily(t *testing.T) {
+// The addresses /proc hands us must survive the trip into probeHosts, family
+// and all. See TestProbeHosts for the ordering rules themselves.
+func TestProbeHostsPrefersMatchingFamily(t *testing.T) {
 	v4, _, _ := parseHexAddr("0100007F:1F90", 4)
 	v6, _, _ := parseHexAddr("00000000000000000000000001000000:1F90", 16)
-	if got := loopbackHosts(v4); got[0] != "127.0.0.1" {
+	if got := probeHosts(v4); got[0] != "127.0.0.1" {
 		t.Errorf("v4 should probe 127.0.0.1 first, got %v", got)
 	}
-	if got := loopbackHosts(v6); got[0] != "::1" {
+	if got := probeHosts(v6); got[0] != "::1" {
 		t.Errorf("v6 should probe ::1 first, got %v", got)
 	}
 }

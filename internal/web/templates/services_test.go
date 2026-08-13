@@ -86,6 +86,36 @@ func TestCardLinksUseRequestHost(t *testing.T) {
 	}
 }
 
+// A service bound to one address is the exception: it answers only there, so
+// the request host would produce a link that refuses the connection.
+func TestCardLinksUseTheBoundAddressWhenNotWildcard(t *testing.T) {
+	v := fixture()
+	v.Public = []discover.Service{{
+		Name: "Catalogue", Port: 8443, Scheme: "https",
+		Bind: "192.168.1.79", Tier: discover.TierPublic, Alive: true,
+	}}
+
+	if got := v.Href(v.Public[0]); got != "https://192.168.1.79:8443/" {
+		t.Errorf("Href = %q, want the bound address", got)
+	}
+	if out := render(t, v); !strings.Contains(out, `href="https://192.168.1.79:8443/"`) {
+		t.Errorf("card should link to the bound address:\n%s", out)
+	}
+
+	v6 := fixture()
+	v6.Public = []discover.Service{{Name: "v6", Port: 8443, Bind: "fd00::1", Tier: discover.TierPublic}}
+	if got := v6.Href(v6.Public[0]); got != "http://[fd00::1]:8443/" {
+		t.Errorf("bound IPv6 address must be bracketed, got %q", got)
+	}
+
+	// A wildcard bind keeps the visitor's own host — a raw IP would be a
+	// downgrade from the name they typed.
+	wild := fixture()
+	if got := wild.Href(wild.Public[0]); got != "http://box.local:3000/" {
+		t.Errorf("wildcard bind should keep the request host, got %q", got)
+	}
+}
+
 func TestEmptyState(t *testing.T) {
 	out := render(t, ServicesView{ShowPrivate: true, LinkHost: "localhost", ScannedAt: time.Now()})
 	if !strings.Contains(out, "No HTTP services found") {

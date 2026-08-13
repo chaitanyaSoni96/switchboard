@@ -3,8 +3,8 @@
 A single page that links to every HTTP service running on this Linux box.
 
 Switchboard reads `/proc` to find every socket in `LISTEN`, works out which
-process owns each one, probes them over loopback to see which actually speak
-HTTP, and renders the survivors as a grid of cards. It shows more to you than it
+process owns each one, probes each at the address it bound to to see which
+actually speak HTTP, and renders the survivors as a grid of cards. It shows more to you than it
 shows to the rest of your network.
 
 One static Go binary. No database, no config file, no runtime dependencies.

@@ -76,14 +76,27 @@ tick for no new information.
   invisible.
 
   A TLS vhost may refuse the probe outright: Go omits SNI for IP literals, so a
-  server with no default certificate has no certificate to present over
-  loopback-by-IP and aborts the handshake. When that happens the mismatch reply
+  server with no default certificate has no certificate to present when probed
+  by IP and aborts the handshake. When that happens the mismatch reply
   is still believed and the card is still labelled `https` — a browser going to
   the real hostname sends SNI and connects fine, whereas an `http://` link would
   be certain to fail.
+- **The probe dials the address the socket bound to.** A wildcard listener
+  (`0.0.0.0`, `::`) answers anywhere, so it is probed over loopback and the
+  request never leaves the box. A listener bound to one address answers only
+  there: `192.168.1.79:8443` refuses a connection to `127.0.0.1:8443`, and so
+  does `127.0.0.2:8080` — loopback is a whole `/8` and only one of its addresses
+  is `127.0.0.1`. Probing loopback alone made every such service invisible.
+  Dialling the bound address still stays on the machine; the kernel routes a
+  local address through `lo` whichever interface owns it. Loopback follows as a
+  fallback, since a port can hold several sockets and only the most public of
+  them decides the card. Liveness dials the same list.
 - **Card links use the host you came in on.** Visit `http://box.local:8090` and
   the cards point at `http://box.local:3000`, not at a loopback address that
-  would resolve to your own machine.
+  would resolve to your own machine. The exception is that same specifically
+  bound listener: it answers at one address and nowhere else, so its card links
+  there — `https://192.168.1.79:8443/` even for a viewer on loopback, because
+  every other host would refuse.
 - **Switchboard excludes itself** — both its own PID and its listening port.
 - **Each card is watermarked with the service's own favicon**, faded down its
   left edge. The href comes from the `<link rel="icon">` already present in the

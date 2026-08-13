@@ -46,6 +46,22 @@ type Service struct {
 	Backend *Backend
 }
 
+// LinkAddr is the address a link to this service must use, or "" when the
+// viewer's own host will do.
+//
+// A wildcard listener answers on every address, including whichever one the
+// visitor typed, so their host is the better link — box.local beats a raw IP.
+// A listener bound to one address answers only there, so that address is the
+// only link that can work: a card for 192.168.1.79:8443 must say so even to a
+// viewer who reached Switchboard over loopback.
+func (s Service) LinkAddr() string {
+	a, err := netip.ParseAddr(s.Bind)
+	if err != nil || a.IsUnspecified() {
+		return ""
+	}
+	return a.String()
+}
+
 // Owner is the process worth showing: the container-side one when this port is
 // a forward, since "rootlesskit" names the plumbing rather than the service.
 func (s Service) Owner() string {
@@ -203,30 +219,32 @@ func (r *Registry) scan(ctx context.Context) Snapshot {
 			continue // our own listener, on some port other than selfPort
 		}
 		k := probeKey{Port: port, PID: owner.PID, Start: owner.Start}
-		keys[k] = loopbackHosts(a.addr)
+		keys[k] = probeHosts(a.addr)
 		meta[k] = a
 		info[k] = owner
 	}
 
 	probes := r.prob.probeAll(keys)
 
-	ports := make([]int, 0, len(keys))
+	// The liveness dial reuses each port's probe hosts: a port that only
+	// answered on one address is only alive at that same address.
+	targets := make(map[int][]string, len(keys))
 	forwarded := map[int]string{}
-	for k := range keys {
+	for k, hosts := range keys {
 		if !probes[k].HTTP {
 			continue
 		}
-		ports = append(ports, k.Port)
+		targets[k.Port] = hosts
 		// Only chase ports whose owner is plumbing. Everything else already
 		// names itself, and the chase is the most expensive thing we do.
 		if comm := info[k].Comm; isForwarder(comm) {
 			forwarded[k.Port] = comm
 		}
 	}
-	live := alive(ctx, ports)
+	live := alive(ctx, targets)
 	backends := r.fwd.lookup(forwarded)
 
-	services := make([]Service, 0, len(ports))
+	services := make([]Service, 0, len(targets))
 	for k, res := range probes {
 		if !res.HTTP {
 			continue // listening, but not an HTTP service
@@ -262,14 +280,36 @@ func tierFor(a netip.Addr) Tier {
 	return TierPublic
 }
 
-// loopbackHosts orders the probe targets for a bind address. A socket bound to
-// ::1 never answers on 127.0.0.1, and vice versa, so try the matching family
-// first and the other as a fallback for dual-stack wildcards.
-func loopbackHosts(a netip.Addr) []string {
-	if a.Is4() {
-		return []string{"127.0.0.1", "::1"}
+// probeHosts orders the addresses worth trying for a listener bound to a.
+//
+// A wildcard socket answers anywhere, so it is probed over loopback and never
+// over the network. But a socket bound to one specific address answers only
+// there: 192.168.1.79:8443 refuses a connection to 127.0.0.1:8443, and so does
+// 127.0.0.2:8080 — the second is loopback and still not 127.0.0.1. Probing
+// only 127.0.0.1 makes every such service invisible, so the bound address
+// leads. That connection stays on the box: the kernel routes a local address
+// through lo regardless of which interface owns it.
+//
+// Loopback follows as a fallback, matching family first, since a port can hold
+// several sockets and the aggregate keeps only the most public of them — a
+// service also bound to loopback is still reachable when its public address is
+// not. A socket bound to ::1 never answers on 127.0.0.1, and vice versa.
+func probeHosts(a netip.Addr) []string {
+	a = a.Unmap() // ::ffff:127.0.0.1 is a v4 listener; dial it as one
+	loopback := []string{"127.0.0.1", "::1"}
+	if a.Is6() {
+		loopback = []string{"::1", "127.0.0.1"}
 	}
-	return []string{"::1", "127.0.0.1"}
+	if !a.IsValid() || a.IsUnspecified() {
+		return loopback
+	}
+	hosts := []string{a.String()}
+	for _, h := range loopback {
+		if h != hosts[0] {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
 }
 
 // displayName picks the most service-like label available.

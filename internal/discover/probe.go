@@ -87,15 +87,15 @@ func newProber() *prober {
 				// send it nothing, and read only its title. Local services use
 				// self-signed or internal-CA certs as a matter of course, and
 				// verifying would simply make every one of them invisible.
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // identification probe, loopback only
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // identification probe, this box's own addresses only
 			},
 		},
 	}
 }
 
 // probeAll resolves every key, probing only those not already cached and
-// running those probes concurrently. keys maps each key to the loopback hosts
-// worth trying for it, in order.
+// running those probes concurrently. keys maps each key to the hosts worth
+// trying for it, in order — see probeHosts.
 func (p *prober) probeAll(keys map[probeKey][]string) map[probeKey]probeResult {
 	p.mu.Lock()
 	todo := make(map[probeKey][]string)
@@ -274,27 +274,31 @@ func parseTitle(body []byte) string {
 	return ""
 }
 
-// alive reports whether each port still accepts a TCP connection. This runs on
-// every request, so it is a bare dial with a short timeout — never a full HTTP
-// round trip.
-func alive(ctx context.Context, ports []int) map[int]bool {
-	out := make(map[int]bool, len(ports))
+// alive reports whether each port still accepts a TCP connection, trying that
+// port's hosts in order — the same ones the identity probe used, since a port
+// that only ever answered on one address is only alive at that address. This
+// runs on every request, so it is a bare dial with a short timeout — never a
+// full HTTP round trip.
+func alive(ctx context.Context, targets map[int][]string) map[int]bool {
+	out := make(map[int]bool, len(targets))
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	d := net.Dialer{Timeout: dialTimeout}
-	for _, port := range ports {
+	for port, hosts := range targets {
 		wg.Add(1)
-		go func(port int) {
+		go func(port int, hosts []string) {
 			defer wg.Done()
-			ok := dialOnce(ctx, d, "127.0.0.1", port)
-			if !ok {
-				// Services bound only to ::1 never answer on the v4 loopback.
-				ok = dialOnce(ctx, d, "::1", port)
+			var ok bool
+			for _, host := range hosts {
+				if dialOnce(ctx, d, host, port) {
+					ok = true
+					break
+				}
 			}
 			mu.Lock()
 			out[port] = ok
 			mu.Unlock()
-		}(port)
+		}(port, hosts)
 	}
 	wg.Wait()
 	return out
